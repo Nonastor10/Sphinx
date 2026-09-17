@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title id="pageTitle">القسم | Sphinx Pack</title>
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="index.html" class="brand">
+      <img src="assets/logo.png" alt="Sphinx Pack">
+      <div class="brand-text"><b>سفينكس باك</b><span>SPHINX PACK</span></div>
+    </a>
+    <nav class="main-nav">
+      <a href="index.html">الرئيسية</a>
+      <a href="index.html#categories">المنتجات</a>
+      <a href="index.html#why">إزاي بنشتغل</a>
+      <a href="index.html#contact">تواصل معانا</a>
+    </nav>
+    <div class="header-actions">
+      <button class="btn-quote" onclick="location.href='index.html#contact'">اطلب عرض سعر</button>
+      <button class="icon-btn" onclick="toggleCartDrawer()" aria-label="السلة">🛒<span class="cart-badge">0</span></button>
+      <a class="icon-btn" href="https://wa.me/201028735709" target="_blank" aria-label="اتصل بنا">📞</a>
+    </div>
+  </div>
+</header>
+
+<section class="page-header">
+  <div class="container">
+    <div class="section-label">قائمة المنتجات</div>
+    <h1 id="catName">القسم</h1>
+    <p id="catDesc"></p>
+  </div>
+</section>
+
+<div class="container">
+  <div class="product-grid" id="productGrid">
+    <div class="empty-state">جارِ تحميل المنتجات...</div>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <div class="container">© Sphinx Pack 2026 — سفينكس باك لمستلزمات تغليف الأطعمة — جميع الحقوق محفوظة</div>
+</footer>
+
+<!-- Cart Drawer -->
+<div class="cart-overlay" id="cartOverlay" onclick="toggleCartDrawer(false)"></div>
+<aside class="cart-drawer" id="cartDrawer">
+  <div class="cart-drawer-header"><h3>سلة الطلب</h3><button onclick="toggleCartDrawer(false)">✕</button></div>
+  <div class="cart-drawer-body" id="cartDrawerBody"></div>
+  <div class="cart-drawer-footer" id="cartDrawerFooter"></div>
+</aside>
+
+<!-- Checkout Modal -->
+<div class="modal-overlay" id="checkoutModal">
+  <div class="modal-box">
+    <h3>بيانات التواصل لإتمام الطلب</h3>
+    <label>الاسم</label>
+    <input type="text" id="checkoutName" placeholder="اسمك أو اسم المحل">
+    <label>رقم الموبايل (اختياري)</label>
+    <input type="tel" id="checkoutPhone" placeholder="01xxxxxxxxx">
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeCheckoutModal()">إلغاء</button>
+      <button class="btn-confirm" id="checkoutConfirmBtn" onclick="confirmSendOrder()">تأكيد الإرسال</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-analytics-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/categories.js"></script>
+<script src="js/cart.js"></script>
+<script>
+  const params = new URLSearchParams(location.search);
+  const catId = params.get("cat");
+  const cat = getCategoryById(catId);
+  const grid = document.getElementById("productGrid");
+
+  if (cat) {
+    document.getElementById("pageTitle").textContent = cat.name + " | Sphinx Pack";
+    document.getElementById("catName").textContent = cat.name;
+    document.getElementById("catDesc").textContent = cat.desc;
+  } else {
+    document.getElementById("catName").textContent = "القسم غير موجود";
+  }
+
+  function renderProducts(products) {
+    if (products.length === 0) {
+      grid.innerHTML = `<div class="empty-state">لسه مفيش منتجات مضافة في القسم ده — تواصل معانا وهنجهزلك عرض سعر.</div>`;
+      return;
+    }
+    grid.innerHTML = products.map(p => `
+      <div class="product-card">
+        <div class="product-img">${p.image ? `<img src="${p.image}" alt="${p.name}">` : "📦"}</div>
+        <div class="product-body">
+          <h4>${p.name}</h4>
+          <div class="product-price">${p.price} ج.م</div>
+          <div class="product-qty-row">
+            <div class="qty-stepper">
+              <button onclick="stepQty('${p.id}', -1)">−</button>
+              <span id="qty-${p.id}">1</span>
+              <button onclick="stepQty('${p.id}', 1)">+</button>
+            </div>
+            <button class="btn-add-cart" onclick="addProductToCart('${p.id}')">أضف للسلة</button>
+          </div>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  const qtyState = {};
+  function stepQty(id, delta) {
+    qtyState[id] = Math.max(1, (qtyState[id] || 1) + delta);
+    document.getElementById("qty-" + id).textContent = qtyState[id];
+  }
+
+  let loadedProducts = [];
+  function addProductToCart(id) {
+    const p = loadedProducts.find(x => x.id === id);
+    if (!p) return;
+    addToCart(p, qtyState[id] || 1);
+    qtyState[id] = 1;
+    document.getElementById("qty-" + id).textContent = 1;
+  }
+
+  if (catId) {
+    db.collection("products").where("category", "==", catId).onSnapshot(
+      (snap) => {
+        loadedProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderProducts(loadedProducts);
+      },
+      (err) => {
+        console.error(err);
+        grid.innerHTML = `<div class="empty-state">تعذر تحميل المنتجات دلوقتي. تأكد إن إعدادات Firebase مظبوطة في js/firebase-config.js</div>`;
+      }
+    );
+  }
+</script>
+</body>
+</html>
